@@ -1,1 +1,182 @@
 
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V2Ray Checker</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--panel:#151d32;--line:#293653;--text:#edf3ff;--muted:#9cacc9;--blue:#61c8ff;--green:#55dfad;--red:#ff7d91}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(ellipse at top,#17274a,var(--bg) 60%);color:var(--text);font-family:system-ui,Tahoma,Arial,sans-serif;min-height:100vh}
+main{width:min(850px,100%);margin:auto;padding:24px 16px 50px}
+header{text-align:center;padding:20px 0 28px}
+.logo{font-size:42px}
+h1{font-size:27px;margin:8px 0}
+p{line-height:1.9;color:var(--muted)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px;margin:15px 0}
+label{display:block;font-weight:700;margin-bottom:10px}
+textarea{width:100%;min-height:190px;resize:vertical;background:#0b1121;color:var(--text);border:1px solid var(--line);border-radius:12px;padding:13px;font:14px/1.8 monospace;direction:ltr;text-align:left}
+button,.filelabel{border:0;border-radius:10px;padding:12px 16px;background:var(--blue);color:#071321;font-weight:750;font-size:14px;cursor:pointer;display:inline-block}
+.secondary{background:#283650;color:var(--text)}
+.actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.stat{padding:14px 8px;text-align:center;border-radius:12px;background:#0c1427;border:1px solid var(--line)}
+.stat strong{display:block;font-size:25px;margin-bottom:5px}
+.stat span{font-size:12px;color:var(--muted)}
+.result{border-bottom:1px solid var(--line);padding:12px 0;overflow-wrap:anywhere}
+.result:last-child{border:0}
+.badge{display:inline-block;padding:3px 8px;border-radius:7px;font-size:12px;margin-left:6px;background:#273750}
+.ok{color:var(--green)}.bad{color:var(--red)}
+.note{font-size:13px}
+input[type=file]{display:none}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:20px}
+@media(max-width:450px){h1{font-size:23px}.panel{padding:13px}.stats{gap:6px}.stat strong{font-size:21px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="logo">🛡️</div>
+<h1>V2Ray Checker</h1>
+<p>بررسی قالب، شناسایی موارد تکراری و پاک‌سازی فهرست کانفیگ‌ها</p>
+</header>
+
+<section class="panel">
+<label for="configs">فهرست کانفیگ‌ها را اینجا وارد کن</label>
+<textarea id="configs" placeholder="کانفیگ‌ها را اینجا بچسبان؛ هر کانفیگ در یک خط"></textarea>
+<div class="actions">
+<button id="check">بررسی کانفیگ‌ها</button>
+<label class="filelabel secondary" for="file">انتخاب فایل متنی</label>
+<input id="file" type="file" accept=".txt,.conf,.csv,text/plain">
+<button id="clear" class="secondary">پاک‌کردن</button>
+</div>
+<p class="note">پردازش در مرورگر انجام می‌شود. این نسخه اطلاعات را به سرور ارسال نمی‌کند.</p>
+</section>
+
+<section class="panel">
+<div class="stats">
+<div class="stat"><strong id="total">۰</strong><span>کل موارد</span></div>
+<div class="stat"><strong id="valid">۰</strong><span>قالب قابل‌شناسایی</span></div>
+<div class="stat"><strong id="invalid">۰</strong><span>نامعتبر یا تکراری</span></div>
+</div>
+<div id="results"><p>هنوز بررسی‌ای انجام نشده است.</p></div>
+<div class="actions" id="outputActions" hidden>
+<button id="copy">کپی موارد یکتا</button>
+<button id="download" class="secondary">دریافت فایل خروجی</button>
+</div>
+</section>
+
+<section class="panel">
+<h3>این ابزار چه چیزی را بررسی می‌کند؟</h3>
+<p>✓ شناسایی قالب‌های رایج مانند VLESS، VMess، Trojan و Shadowsocks</p>
+<p>✓ حذف موارد تکراری</p>
+<p>✓ تشخیص خط‌های خالی و قالب‌های قابل‌شناسایی</p>
+<p>✗ فعال‌بودن سرور، سرعت اینترنت و حجم باقی‌مانده را بررسی نمی‌کند.</p>
+</section>
+<footer>V2Ray Checker · نسخهٔ اولیه</footer>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let cleanConfigs = [];
+
+function fa(n){return n.toLocaleString('fa-IR')}
+
+function classify(line){
+  const s = line.trim();
+  const schemes = ['vless://','vmess://','trojan://','ss://','socks://','http://','https://'];
+  if(!schemes.some(p=>s.toLowerCase().startsWith(p)))
+    return {ok:false,reason:'قالب یا پیشوند ناشناخته'};
+
+  try {
+    if(s.toLowerCase().startsWith('vmess://')){
+      const payload=s.slice(8);
+      const decoded=atob(payload.replace(/-/g,'+').replace(/_/g,'/'));
+      const data=JSON.parse(decoded);
+      if(!data.add || !data.port || !data.id)
+        return {ok:false,reason:'فیلدهای ضروری VMess ناقص‌اند'};
+      return {ok:true,type:'VMess'};
+    }
+    const url=new URL(s);
+    if(!url.hostname)
+      return {ok:false,reason:'آدرس میزبان موجود نیست'};
+    if(['vless:','trojan:'].includes(url.protocol) && !url.username)
+      return {ok:false,reason:'شناسهٔ اتصال موجود نیست'};
+    return {ok:true,type:url.protocol.slice(0,-1).toUpperCase()};
+  } catch(e){
+    return {ok:false,reason:'ساختار قابل‌خواندن نیست'};
+  }
+}
+
+function check(){
+  const lines=$('configs').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  const seen=new Set(), unique=[], rows=[];
+  let invalid=0, duplicates=0;
+
+  for(const line of lines){
+    if(seen.has(line)){duplicates++;invalid++;continue}
+    seen.add(line);
+    const c=classify(line);
+    if(c.ok){unique.push(line);rows.push({line,type:c.type,ok:true})}
+    else {invalid++;rows.push({line,reason:c.reason,ok:false})}
+  }
+  cleanConfigs=unique;
+  $('total').textContent=fa(lines.length);
+  $('valid').textContent=fa(unique.length);
+  $('invalid').textContent=fa(invalid);
+  $('outputActions').hidden=unique.length===0;
+
+  const duplicatesNote=duplicates
+    ? `<p class="note">موارد تکراری حذف‌شده: ${fa(duplicates)}</p>`:'';
+  $('results').innerHTML=duplicatesNote+(rows.length?rows.map(r=>
+    `<div class="result"><span class="badge ${r.ok?'ok':'bad'}">${r.ok?'قالب قابل‌شناسایی':'بررسی ناموفق'}</span>
+    ${r.ok?escapeHTML(r.type):escapeHTML(r.reason)}
+    <div class="note" dir="ltr">${escapeHTML(maskSensitive(r.line))}</div></div>`
+  ).join(''):'<p>موردی وارد نشده است.</p>');
+}
+
+function maskSensitive(s){
+  try{
+    const u=new URL(s);
+    if(u.username)u.username='••••';
+    if(u.password)u.password='••••';
+    return u.toString();
+  }catch(e){return s.slice(0,100)}
+}
+function escapeHTML(s){
+  return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+$('check').addEventListener('click',check);
+$('clear').addEventListener('click',()=>{
+  $('configs').value='';
+  cleanConfigs=[];
+  $('total').textContent='۰';
+  $('valid').textContent='۰';
+  $('invalid').textContent='۰';
+  $('results').innerHTML='<p>هنوز بررسی‌ای انجام نشده است.</p>';
+  $('outputActions').hidden=true;
+});
+$('file').addEventListener('change',async e=>{
+  const f=e.target.files[0];
+  if(f)$('configs').value=await f.text();
+});
+$('copy').addEventListener('click',async()=>{
+  try{
+    await navigator.clipboard.writeText(cleanConfigs.join('\n'));
+    $('copy').textContent='کپی شد ✓';
+    setTimeout(()=>$('copy').textContent='کپی موارد یکتا',1800);
+  }catch(e){alert('کپی خودکار در دسترس نیست؛ از خروجی فایل استفاده کن.')}
+});
+$('download').addEventListener('click',()=>{
+  const blob=new Blob([cleanConfigs.join('\n')],{type:'text/plain;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='checked-configs.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+</script>
+</body>
+</html>
